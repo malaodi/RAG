@@ -1,0 +1,120 @@
+version: '3.8'
+services:
+  # 1. 后端 API 服务
+  swxy_api:
+    build:
+      # 路径修正：从根目录指向 backend
+      context: ./backend/app  # 构建上下文直接指向包含 Dockerfile 的文件夹
+      dockerfile: Dockerfile
+    hostname: swxy_api
+    container_name: swxy_api
+    environment:
+      - HF_ENDPOINT=https://hf-mirror.com
+      - DATABASE_URL=postgresql://postgres:pg123456@gsk_pg:5432/gsk
+      - ES_HOST=http://es01:9200
+      - ROOT_PATH=http://localhost:8000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./backend/.env  # 路径修正
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app  # 将宿主机的代码文件夹直接映射到容器的工作目录
+      - ./backend/nltk_data:/usr/local/nltk_data  # 路径修正
+    command: ["uvicorn", "app_main:app", "--host", "0.0.0.0", "--port", "8000"] # 修正了 app.main 的路径写法
+    restart: unless-stopped
+    depends_on:
+      - gsk_pg
+      - es01
+      - redis
+    networks:
+      - gsk_network
+
+  # 2. 前端服务 (新增)
+  swxy_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: swxy_frontend
+    ports:
+      - "5181:80"       # 宿主机 5181 映射到容器 Nginx 的 80 端口
+    restart: always
+    depends_on:
+      - swxy_api
+    networks:
+      - gsk_network
+
+  # 3. Elasticsearch 服务
+  es01:
+    container_name: gsk-es-01
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
+    volumes:
+      - gsk_esdata01:/usr/share/elasticsearch/data
+    env_file: ./backend/.env # 路径修正
+    environment:
+      - node.name=es01
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - bootstrap.memory_lock=false
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - cluster.routing.allocation.disk.watermark.low=5gb
+      - cluster.routing.allocation.disk.watermark.high=3gb
+      - cluster.routing.allocation.disk.watermark.flood_stage=2gb
+      - TZ=Asia/Shanghai
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # 针对内存优化的设置
+    # mem_limit: ${MEM_LIMIT} # 如果没有在 .env 定义，建议先注释掉
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl http://localhost:9200"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+    restart: on-failure
+    networks:
+      - gsk_network
+
+  # 4. PostgreSQL 数据库
+  gsk_pg:
+    container_name: gsk_pg
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_PASSWORD=pg123456
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=gsk
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql # 路径修正
+    restart: unless-stopped
+    networks:
+      - gsk_network
+
+  # 5. Redis 缓存
+  redis:
+    container_name: gsk_redis
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - gsk_network
+
+volumes:
+  gsk_esdata01:
+    driver: local
+  pg_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  gsk_network:
+    driver: bridge
