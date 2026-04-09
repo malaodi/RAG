@@ -39,6 +39,9 @@ from alembic.runtime.environment import EnvironmentContext
 from sqlalchemy import create_engine, text
 
 try:
+
+    alembic_cfg = Config('alembic.ini')
+
     # 检查是否存在alembic_version表
     engine = create_engine(os.environ['DATABASE_URL'])
     with engine.connect() as conn:
@@ -47,7 +50,7 @@ try:
         
         if not table_exists:
             print('首次部署，标记baseline...')
-            alembic_cfg = Config('alembic.ini')
+
             command.stamp(alembic_cfg, '980b32f130df')
             print('Baseline标记完成')
         

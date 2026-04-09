@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from utils.database import get_db
+from models.message import Message  # 确保路径正确
 import uuid
 from datetime import datetime
 
@@ -34,3 +36,30 @@ class SessionService:
 # 服务实例化
 def get_session_service(db: Session = next(get_db())):
     return SessionService(db)
+
+
+
+
+def get_chat_history_from_db(db: Session, session_id: str, limit: int = 5):
+    try:
+        stmt = (
+            select(Message)
+            .where(Message.session_id == session_id)
+            .order_by(Message.created_at.desc()) # <--- 改成 created_at
+            .limit(limit)
+        )
+        results = db.execute(stmt).scalars().all()
+
+        # 数据库是倒序取的（最近的在前面），我们需要反转回正序（先说的在前面）
+        results.reverse()
+
+        chat_history = []
+        for msg in results:
+            chat_history.append({"role": "user", "content": msg.user_question})
+            chat_history.append({"role": "assistant", "content": msg.model_answer})
+
+        return chat_history
+    except Exception as e:
+        # 记录日志，这里假设你已经定义了 logger
+        print(f"Error fetching chat history: {e}")
+        return []

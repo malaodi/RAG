@@ -23,7 +23,7 @@ import re
 from service.core.deepdoc.parser.pdf_parser import PlainParser
 from service.core.rag.nlp import rag_tokenizer, naive_merge, tokenize_table, tokenize_chunks, find_codec, concat_img, \
     naive_merge_docx, tokenize_chunks_docx
-from service.core.deepdoc.parser import PdfParser, ExcelParser, DocxParser, HtmlParser, JsonParser, MarkdownParser, TxtParser
+from service.core.deepdoc.parser import PdfParser, ExcelParser, DocxParser, HtmlParser, JsonParser, MarkdownParser, TxtParser, PptParser
 from service.core.rag.utils import num_tokens_from_string
 from PIL import Image
 from functools import reduce
@@ -290,6 +290,23 @@ def chunk(filename, binary=None, from_page=0, to_page=100000,
             callback(0.8, f"tika.parser got empty content from {filename}.")
             logging.warning(f"tika.parser got empty content from {filename}.")
             return []
+
+    elif re.search(r"\.pptx?$", filename, re.IGNORECASE):
+        callback(0.1, "Start to parse PPT.")
+
+        # 1. 实例化你提供的 PPT 解析器
+        ppt_parser = PptParser()
+
+        # 2. 调用解析器获取每页（Slide）的文本列表
+        # 注意：这里的 __call__ 接收 (文件名/二进制流, 起始页, 结束页, 回调)
+        input_data = binary if binary else filename
+        slide_texts = ppt_parser(input_data, from_page, to_page, callback)
+
+        # 3. 转化为标准格式 [(文本内容, 图片占位)]
+        # 解析器返回的是 [slide1_text, slide2_text, ...]
+        sections = [(text, "") for text in slide_texts if text.strip()]
+
+        callback(0.8, "Finish parsing.")
 
     else:
         raise NotImplementedError(

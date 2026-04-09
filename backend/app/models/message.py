@@ -10,8 +10,11 @@ class Message(Base):
     session_id = Column(String(16), nullable=False)
     user_question = Column(Text, nullable=False)
     model_answer = Column(Text, nullable=False)
-    create_time = Column(TIMESTAMP, server_default=func.now())
-    retrieval_content = Column(Text)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    documents = Column(Text)
+
+    recommended_questions = Column(Text)
+    think = Column(Text)
 
 class KnowledgeBase(Base):
     __tablename__ = 'knowledgebases'  # 表名

@@ -12,6 +12,7 @@ services:
       - HF_ENDPOINT=https://hf-mirror.com
       - DATABASE_URL=postgresql://postgres:pg123456@gsk_pg:5432/gsk
       - ES_HOST=http://es01:9200
+      - ELASTICSEARCH_URL=http://es01:9200
       - ROOT_PATH=http://localhost:8000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -57,7 +58,8 @@ services:
     env_file: ./backend/.env # 路径修正
     environment:
       - node.name=es01
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - ES_PASSWORD=${ELASTIC_PASSWORD}
+      - ES_USER=elastic
       - bootstrap.memory_lock=false
       - discovery.type=single-node
       - xpack.security.enabled=true
