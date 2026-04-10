@@ -277,199 +277,326 @@ def update_session_name(session_id: str, question: str, user_id: str):
     finally:
         db.close()
 
+# def get_chat_completion(session_id, question, retrieved_content, user_id):
+#     """
+#     获取流式聊天完成结果，并按照指定格式输出。
+#
+#     :param session_id: 会话 ID（可选，如需区分不同会话可传入）
+#     :param question: 用户问题
+#     :param retrieved_content: 从知识库检索的内容
+#     :param user_id: 用户ID
+#     :return: 流式输出的生成器，每个元素为符合 SSE 格式的字符串
+#     """
+#     # 获取快速解析的文档内容
+#     quick_parse_content = get_quick_parse_content(session_id)
+#
+#     # 构建参考内容
+#     reference_parts = []
+#     reference_id = 1
+#
+#     # 1. 添加知识库检索内容
+#     if retrieved_content:
+#         knowledge_base_refs = []
+#         for ref in retrieved_content:
+#             knowledge_base_refs.append(f"[{reference_id}] {ref['content_with_weight']}")
+#             reference_id += 1
+#         if knowledge_base_refs:
+#             reference_parts.append("**知识库内容：**\n" + "\n".join(knowledge_base_refs))
+#
+#     # 2. 添加快速解析文档内容
+#     if quick_parse_content:
+#         # 将快速解析内容按段落分割，避免内容过长
+#         quick_content_paragraphs = [para.strip() for para in quick_parse_content.split('\n') if para.strip()]
+#         if quick_content_paragraphs:
+#             # 限制快速解析内容的长度，避免提示词过长
+#             max_quick_content_length = 4000
+#             truncated_content = quick_parse_content[:max_quick_content_length]
+#             if len(quick_parse_content) > max_quick_content_length:
+#                 truncated_content += "...(内容已截断)"
+#             reference_parts.append(f"**当前会话文档内容：**\n[{reference_id}] {truncated_content}")
+#             reference_id += 1
+#
+#     # 组合所有参考内容
+#     if reference_parts:
+#         formatted_references = "\n\n".join(reference_parts)
+#     else:
+#         formatted_references = "暂无相关参考内容"
+#
+#     prompt = f"""
+# 你是一个专业的智能助手，擅长基于提供的参考资料回答用户问题。请遵循以下原则：
+#
+# **回答要求：**
+# 1. 优先基于参考内容回答，确保答案准确可靠
+# 2. 在回答中，每一块内容都必须标注引用的来源，格式为：##引用编号$$。例如：##1$$ 表示引用自第1条参考内容。
+# 3. 如果参考内容不足以完全回答问题，可以结合常识补充，但需明确区分
+# 4. 回答要条理清晰、语言自然流畅
+# 5. 如果没有相关参考内容，请诚实说明并提供一般性建议
+#
+# **参考内容：**
+# {formatted_references}
+#
+# **用户问题：**
+# {question}
+#
+# 请基于以上信息提供专业、准确的回答。
+#     """
+#
+#     print(prompt)
+#
+#     try:
+#         # 初始化 OpenAI 客户端
+#         client = OpenAI(
+#             api_key=os.getenv("DASHSCOPE_API_KEY"),
+#             base_url=os.getenv("DASHSCOPE_BASE_URL")
+#         )
+#
+#         # 创建聊天完成请求
+#         completion = client.chat.completions.create(
+#             model="deepseek-r1",  # 可按需更换模型名称
+#             messages=[
+#                 {"role": "user", "content": prompt}
+#             ],
+#             stream=True,
+#         )
+#
+#         # 返回检索内容和快速解析内容
+#         all_documents = retrieved_content.copy() if retrieved_content else []
+#
+#         # 如果有快速解析内容，将其格式化后添加到文档列表中
+#         if quick_parse_content:
+#             # 将快速解析内容分段，避免单个文档过长
+#             max_chunk_length = 2000
+#             content_chunks = []
+#
+#             if len(quick_parse_content) <= max_chunk_length:
+#                 content_chunks = [quick_parse_content]
+#             else:
+#                 # 按段落分割内容
+#                 paragraphs = [p.strip() for p in quick_parse_content.split('\n') if p.strip()]
+#                 current_chunk = ""
+#
+#                 for paragraph in paragraphs:
+#                     if len(current_chunk + paragraph) <= max_chunk_length:
+#                         current_chunk += paragraph + "\n"
+#                     else:
+#                         if current_chunk:
+#                             content_chunks.append(current_chunk.strip())
+#                         current_chunk = paragraph + "\n"
+#
+#                 if current_chunk:
+#                     content_chunks.append(current_chunk.strip())
+#
+#             # 将每个内容块格式化为文档格式添加到all_documents
+#             for i, chunk in enumerate(content_chunks):
+#                 quick_parse_doc = {
+#                     "document_id": f"quick_parse_{session_id}_{i}",
+#                     "document_name": f"当前会话文档-第{i+1}部分" if len(content_chunks) > 1 else "当前会话文档",
+#                     "content_with_weight": chunk,
+#                     "id": f"quick_parse_{session_id}_{i}",
+#                     "positions": []
+#                 }
+#                 all_documents.append(quick_parse_doc)
+#
+#             logger.info(f"快速解析内容已添加到文档列表，共{len(content_chunks)}个部分")
+#
+#         message = {
+#             "documents": all_documents,
+#         }
+#         json_message = json.dumps(message, ensure_ascii=False)
+#         yield f"event: message\ndata: {json_message}\n\n"
+#
+#         # 处理流式响应
+#         model_answer = ""  # 用于存储大模型的回答
+#         think = "" # 用于存储思考过程
+#         recommended_questions = []  # 初始化推荐问题列表
+#
+#         for chunk in completion:
+#             if chunk.choices[0].finish_reason == "stop":
+#                 # 生成推荐问题
+#                 try:
+#                     logger.info("开始生成推荐问题...")
+#                     recommended_questions = generate_recommended_questions(question, retrieved_content, session_id)
+#                     logger.info(f"推荐问题生成结果: {recommended_questions}")
+#
+#                     if recommended_questions:
+#                         message = {
+#                             "recommended_questions": recommended_questions,
+#                         }
+#                         json_message = json.dumps(message)
+#                         yield f"event: message\ndata: {json_message}\n\n"
+#                         logger.info("推荐问题已发送给前端")
+#                     else:
+#                         logger.warning("推荐问题生成为空")
+#
+#                 except Exception as e:
+#                     logger.error(f"生成推荐问题失败: {str(e)}")
+#                     recommended_questions = []  # 确保变量有值
+#
+#                 # 结束时发送 [DONE] 事件
+#                 yield "event: end\ndata: [DONE]\n\n"
+#                 # 将对话数据写入数据库
+#                 print("最终回答：\n")
+#                 print(model_answer)
+#                 write_chat_to_db(session_id, question, model_answer, all_documents, recommended_questions, think)
+#
+#                 # 生成会话名称
+#                 update_session_name(session_id, question, user_id)
+#                 break
+#             else:
+#                 # 实时输出消息
+#                 delta = chunk.choices[0].delta
+#                 if delta.content:
+#                     model_answer += delta.content  # 累加大模型的回答
+#                     message = {
+#                         "role": "assistant",
+#                         "content": delta.content,
+#                         "thinking": False,
+#                     }
+#                     json_message = json.dumps(message)
+#                     yield f"event: message\ndata: {json_message}\n\n"
+#                 else:
+#                     think += delta.reasoning_content
+#                     message = {
+#                         "role": "assistant",
+#                         "content": delta.reasoning_content,
+#                         "thinking": True,
+#                     }
+#                     json_message = json.dumps(message)
+#                     yield f"event: message\ndata: {json_message}\n\n"
+#
+#     except Exception as e:
+#         # 发生错误时返回错误信息
+#         error_message = {
+#             "role": "error",
+#             "content": str(e)
+#         }
+#         json_error_message = json.dumps(error_message)
+#         yield f"event: error\ndata: {json_error_message}\n\n"
+
+
+# 导入你项目中的依赖（请确保路径与你实际目录一致）
+from service.session_service import get_chat_history_from_db
+from utils.database import SessionLocal
+from service.core.chat import write_chat_to_db, update_session_name
+
+
+
 def get_chat_completion(session_id, question, retrieved_content, user_id):
     """
-    获取流式聊天完成结果，并按照指定格式输出。
-
-    :param session_id: 会话 ID（可选，如需区分不同会话可传入）
-    :param question: 用户问题
-    :param retrieved_content: 从知识库检索的内容
-    :param user_id: 用户ID
-    :return: 流式输出的生成器，每个元素为符合 SSE 格式的字符串
+    获取通义千问(Qwen)流式聊天结果，支持多轮对话和 RAG 注入。
     """
-    # 获取快速解析的文档内容
-    quick_parse_content = get_quick_parse_content(session_id)
-    
-    # 构建参考内容
+
+    # 1. 开启数据库 Session 并获取历史对话记录
+    db = SessionLocal()
+    chat_history = []
+    try:
+        # 获取最近 5 轮（10 条记录），用于构建上下文记忆
+        chat_history = get_chat_history_from_db(db, session_id, limit=5)
+        logger.info(f"会话 {session_id} 加载历史记录成功，共 {len(chat_history)} 条")
+    except Exception as e:
+        logger.error(f"加载历史记录失败: {str(e)}")
+    finally:
+        db.close()  # 读取完毕即刻释放数据库连接
+
+    # 2. 格式化 RAG 检索到的参考资料
     reference_parts = []
     reference_id = 1
-    
-    # 1. 添加知识库检索内容
     if retrieved_content:
-        knowledge_base_refs = []
+        knowledge_refs = []
         for ref in retrieved_content:
-            knowledge_base_refs.append(f"[{reference_id}] {ref['content_with_weight']}")
-            reference_id += 1
-        if knowledge_base_refs:
-            reference_parts.append("**知识库内容：**\n" + "\n".join(knowledge_base_refs))
-    
-    # 2. 添加快速解析文档内容
-    if quick_parse_content:
-        # 将快速解析内容按段落分割，避免内容过长
-        quick_content_paragraphs = [para.strip() for para in quick_parse_content.split('\n') if para.strip()]
-        if quick_content_paragraphs:
-            # 限制快速解析内容的长度，避免提示词过长
-            max_quick_content_length = 4000
-            truncated_content = quick_parse_content[:max_quick_content_length]
-            if len(quick_parse_content) > max_quick_content_length:
-                truncated_content += "...(内容已截断)"
-            reference_parts.append(f"**当前会话文档内容：**\n[{reference_id}] {truncated_content}")
-            reference_id += 1
-    
-    # 组合所有参考内容
-    if reference_parts:
-        formatted_references = "\n\n".join(reference_parts)
-    else:
-        formatted_references = "暂无相关参考内容"
-    
-    prompt = f"""
-你是一个专业的智能助手，擅长基于提供的参考资料回答用户问题。请遵循以下原则：
+            doc_name = ref.get('document_name', '未知文件')
+            content = ref.get('content_with_weight', '').strip()
+            if content:
+                knowledge_refs.append(f"[{reference_id}] 来自文件《{doc_name}》：{content}")
+                reference_id += 1
+        if knowledge_refs:
+            reference_parts.append("**参考资料：**\n" + "\n".join(knowledge_refs))
 
-**回答要求：**
-1. 优先基于参考内容回答，确保答案准确可靠
-2. 在回答中，每一块内容都必须标注引用的来源，格式为：##引用编号$$。例如：##1$$ 表示引用自第1条参考内容。
-3. 如果参考内容不足以完全回答问题，可以结合常识补充，但需明确区分
-4. 回答要条理清晰、语言自然流畅
-5. 如果没有相关参考内容，请诚实说明并提供一般性建议
+    formatted_references = "\n\n".join(reference_parts) if reference_parts else "暂无相关参考内容"
 
-**参考内容：**
+    # 3. 构造标准的 OpenAI 格式 Messages 列表
+    messages = []
+
+    # A. 系统提示词 (System Prompt)：定义角色、参考资料和回复规范
+    system_prompt = f"""你是一个专业的 AI 助手，请基于提供的参考资料回答用户问题，每条资料都标注了其来源文件名。
+
+【数据处理规则】：
+1. 空内容判定：如果某条参考资料的内容为空字符串，请彻底忽略该条资料，不要对其进行任何解读。
+2. 匿名来源处理：如果资料来源显示为“未知文件”，说明该内容来源不明。在回答时仅陈述事实，严禁为该资料臆造文件名、作者或背景。
+3. 缺失处理：如果用户询问的文件名不在参考资料的【来自文件《文件名》】列表中，请明确告知用户：“在当前的检索范围内未找到名为《XXX》的文件内容”，不要尝试用其他文件的内容来冒充。
+
+
+【回答要求】：
+1. 优先根据【参考资料】中的内容回答，确保准确。
+2. 必须在回答中通过 ##编号$$ 标注引用来源，例如：##1$$。
+3. 如果参考资料不足，可以结合上下文和常识回答，但需明确说明。
+4. 结合【历史对话】保持回答的连贯性，不要重复已经说过的话。
+5. 严禁幻觉：如果参考资料中完全没有相关信息，且无法通过常识给出确定答案，请诚实回答“我不知道”或“参考资料未提及”。
+
+【参考资料】：
 {formatted_references}
+"""
+    messages.append({"role": "system", "content": system_prompt})
 
-**用户问题：**
-{question}
+    # B. 注入历史对话内容 (按照顺序存入 user 和 assistant 的话)
+    for msg in chat_history:
+        messages.append(msg)
 
-请基于以上信息提供专业、准确的回答。
-    """
-
-    print(prompt)
+    # C. 注入当前用户的问题
+    messages.append({"role": "user", "content": question})
 
     try:
-        # 初始化 OpenAI 客户端
+        # 4. 初始化 OpenAI 兼容客户端（阿里云 Dashscope 接口）
         client = OpenAI(
             api_key=os.getenv("DASHSCOPE_API_KEY"),
             base_url=os.getenv("DASHSCOPE_BASE_URL")
         )
 
-        # 创建聊天完成请求
+        # 5. 调用 Qwen 模型
+        # 注意：这里可以根据你在 .env 中的配置修改模型名，如 qwen-max, qwen-plus, qwen-turbo
         completion = client.chat.completions.create(
-            model="deepseek-r1",  # 可按需更换模型名称
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            model="qwen-max",  # 建议使用 qwen-max 或 qwen-plus
+            messages=messages,
             stream=True,
         )
 
-        # 返回检索内容和快速解析内容
+        # --- 6. 流式数据处理与 yield 返回 ---
+
+        # 首先发送参考文档列表（前端用于渲染“参考来源”卡片）
         all_documents = retrieved_content.copy() if retrieved_content else []
-        
-        # 如果有快速解析内容，将其格式化后添加到文档列表中
-        if quick_parse_content:
-            # 将快速解析内容分段，避免单个文档过长
-            max_chunk_length = 2000
-            content_chunks = []
-            
-            if len(quick_parse_content) <= max_chunk_length:
-                content_chunks = [quick_parse_content]
-            else:
-                # 按段落分割内容
-                paragraphs = [p.strip() for p in quick_parse_content.split('\n') if p.strip()]
-                current_chunk = ""
-                
-                for paragraph in paragraphs:
-                    if len(current_chunk + paragraph) <= max_chunk_length:
-                        current_chunk += paragraph + "\n"
-                    else:
-                        if current_chunk:
-                            content_chunks.append(current_chunk.strip())
-                        current_chunk = paragraph + "\n"
-                
-                if current_chunk:
-                    content_chunks.append(current_chunk.strip())
-            
-            # 将每个内容块格式化为文档格式添加到all_documents
-            for i, chunk in enumerate(content_chunks):
-                quick_parse_doc = {
-                    "document_id": f"quick_parse_{session_id}_{i}",
-                    "document_name": f"当前会话文档-第{i+1}部分" if len(content_chunks) > 1 else "当前会话文档",
-                    "content_with_weight": chunk,
-                    "id": f"quick_parse_{session_id}_{i}",
-                    "positions": []
-                }
-                all_documents.append(quick_parse_doc)
-            
-            logger.info(f"快速解析内容已添加到文档列表，共{len(content_chunks)}个部分")
-        
-        message = {
-            "documents": all_documents,
-        }
-        json_message = json.dumps(message, ensure_ascii=False)
-        yield f"event: message\ndata: {json_message}\n\n"
+        yield f"event: message\ndata: {json.dumps({'documents': all_documents}, ensure_ascii=False)}\n\n"
 
-        # 处理流式响应
-        model_answer = ""  # 用于存储大模型的回答
-        think = "" # 用于存储思考过程
-        recommended_questions = []  # 初始化推荐问题列表
-        
+        full_answer = ""  # 累积完整的回答，用于最后存入数据库
+
         for chunk in completion:
+            # 检查是否生成完毕
             if chunk.choices[0].finish_reason == "stop":
-                # 生成推荐问题
-                try:
-                    logger.info("开始生成推荐问题...")
-                    recommended_questions = generate_recommended_questions(question, retrieved_content, session_id)
-                    logger.info(f"推荐问题生成结果: {recommended_questions}")
-                    
-                    if recommended_questions:
-                        message = {
-                            "recommended_questions": recommended_questions,
-                        }
-                        json_message = json.dumps(message)
-                        yield f"event: message\ndata: {json_message}\n\n"
-                        logger.info("推荐问题已发送给前端")
-                    else:
-                        logger.warning("推荐问题生成为空")
-                        
-                except Exception as e:
-                    logger.error(f"生成推荐问题失败: {str(e)}")
-                    recommended_questions = []  # 确保变量有值
-
-                # 结束时发送 [DONE] 事件
+                # 发送结束事件
                 yield "event: end\ndata: [DONE]\n\n"
-                # 将对话数据写入数据库
-                print("最终回答：\n")
-                print(model_answer)
-                write_chat_to_db(session_id, question, model_answer, all_documents, recommended_questions, think)
 
-                # 生成会话名称
-                update_session_name(session_id, question, user_id)
+                # 7. 数据持久化：对话结束后存入数据库
+                try:
+                    # 写入数据库 messages 表
+                    write_chat_to_db(session_id, question, full_answer, all_documents, [], "")
+                    # 自动更新会话名称（通常基于第一轮问题的摘要）
+                    update_session_name(session_id, question, user_id)
+                except Exception as db_err:
+                    logger.error(f"对话存档失败: {str(db_err)}")
                 break
-            else:
-                # 实时输出消息
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    model_answer += delta.content  # 累加大模型的回答
-                    message = {
-                        "role": "assistant",
-                        "content": delta.content,
-                        "thinking": False,
-                    }
-                    json_message = json.dumps(message)
-                    yield f"event: message\ndata: {json_message}\n\n"
-                else:
-                    think += delta.reasoning_content
-                    message = {
-                        "role": "assistant",
-                        "content": delta.reasoning_content,
-                        "thinking": True,
-                    }
-                    json_message = json.dumps(message)
-                    yield f"event: message\ndata: {json_message}\n\n"
+
+            # 处理流式文本片段
+            delta = chunk.choices[0].delta
+            if delta.content:
+                full_answer += delta.content
+                # 构造符合前端 SSE 格式的 JSON
+                message = {
+                    "role": "assistant",
+                    "content": delta.content,
+                    "thinking": False  # 千问普通模型暂无显式思考过程
+                }
+                yield f"event: message\ndata: {json.dumps(message, ensure_ascii=False)}\n\n"
 
     except Exception as e:
-        # 发生错误时返回错误信息
-        error_message = {
-            "role": "error",
-            "content": str(e)
-        }
-        json_error_message = json.dumps(error_message)
-        yield f"event: error\ndata: {json_error_message}\n\n"
-
+        logger.exception("调用千问模型流式接口发生异常")
+        error_info = {"role": "error", "content": f"AI服务响应失败: {str(e)}"}
+        yield f"event: error\ndata: {json.dumps(error_info, ensure_ascii=False)}\n\n"
